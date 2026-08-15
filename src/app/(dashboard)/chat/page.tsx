@@ -27,6 +27,7 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const enviandoAccionRef = useRef(false);
+  const textoBaseRef = useRef("");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -39,13 +40,13 @@ export default function ChatPage() {
     const rec = new SR();
     rec.lang = "es-PE";
     rec.interimResults = true;
-    rec.continuous = false;
+    rec.continuous = true;
     rec.onresult = (e: any) => {
       let texto = "";
       for (let i = 0; i < e.results.length; i++) {
         if (e.results[i] && e.results[i][0]) texto += e.results[i][0].transcript;
       }
-      setInput(texto);
+      setInput(textoBaseRef.current + texto);
     };
     rec.onend = () => setEscuchando(false);
     rec.onerror = () => setEscuchando(false);
@@ -69,7 +70,8 @@ export default function ChatPage() {
       rec.stop();
       setEscuchando(false);
     } else {
-      setInput("");
+      // Guarda el texto actual como base para ir anexando lo nuevo
+      textoBaseRef.current = input;
       try {
         rec.start();
         setEscuchando(true);
