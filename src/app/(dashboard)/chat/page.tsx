@@ -28,6 +28,8 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const enviandoAccionRef = useRef(false);
   const textoBaseRef = useRef("");
+  const finalTranscriptRef = useRef("");
+  const lastResultIndexRef = useRef(0);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -42,14 +44,33 @@ export default function ChatPage() {
     rec.interimResults = true;
     rec.continuous = true;
     rec.onresult = (e: any) => {
-      let texto = "";
-      for (let i = 0; i < e.results.length; i++) {
-        if (e.results[i] && e.results[i][0]) texto += e.results[i][0].transcript;
+      // Solo procesa resultados NUEVOS desde el último índice
+      let interim = "";
+      for (let i = lastResultIndexRef.current; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res && res[0]) {
+          if (res.isFinal) {
+            finalTranscriptRef.current += res[0].transcript;
+          } else {
+            interim += res[0].transcript;
+          }
+        }
       }
-      setInput(textoBaseRef.current + texto);
+      lastResultIndexRef.current = e.results.length;
+      setInput(textoBaseRef.current + finalTranscriptRef.current + interim);
     };
-    rec.onend = () => setEscuchando(false);
-    rec.onerror = () => setEscuchando(false);
+    rec.onend = () => {
+      // Al detener: consolida lo final en la base y resetea contadores
+      textoBaseRef.current += finalTranscriptRef.current;
+      finalTranscriptRef.current = "";
+      lastResultIndexRef.current = 0;
+      setEscuchando(false);
+    };
+    rec.onerror = () => {
+      finalTranscriptRef.current = "";
+      lastResultIndexRef.current = 0;
+      setEscuchando(false);
+    };
     recognitionRef.current = rec;
   }, []);
 
@@ -70,8 +91,10 @@ export default function ChatPage() {
       rec.stop();
       setEscuchando(false);
     } else {
-      // Guarda el texto actual como base para ir anexando lo nuevo
+      // Guarda el texto actual como base; resetea transcript final e índice
       textoBaseRef.current = input;
+      finalTranscriptRef.current = "";
+      lastResultIndexRef.current = 0;
       try {
         rec.start();
         setEscuchando(true);
