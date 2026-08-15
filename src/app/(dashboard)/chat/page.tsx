@@ -62,7 +62,18 @@ export default function ChatPage() {
 
   function startRecognition() {
     const rec = createRecognition();
-    if (!rec) return;
+    if (!rec) {
+      setMensajes((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content:
+            "🎤 Tu navegador no permite el dictado en esta página. Si estás en el celular, usa el micrófono del teclado (Gboard) para hablar en lugar de escribir.",
+        },
+      ]);
+      setEscuchando(false);
+      return;
+    }
     destroyRecognition(recognitionRef.current);
     recognitionRef.current = rec;
 
@@ -97,11 +108,36 @@ export default function ChatPage() {
         if (escuchandoRef.current) startRecognition();
         return;
       }
+      if (err?.error === "not-allowed" || err?.error === "permission-denied") {
+        setMensajes((m) => [
+          ...m,
+          {
+            role: "assistant",
+            content:
+              "🎤 Permiso de micrófono denegado. Actívalo en la configuración del navegador y recarga la página.",
+          },
+        ]);
+        setEscuchando(false);
+        return;
+      }
       console.warn("[SpeechRecognition] error:", err);
       if (escuchandoRef.current) startRecognition();
     };
 
-    rec.start();
+    try {
+      rec.start();
+    } catch (err) {
+      console.warn("[SpeechRecognition] start error:", err);
+      setMensajes((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content:
+            "🎤 No se pudo iniciar el micrófono. Verifica permisos y recarga la página.",
+        },
+      ]);
+      setEscuchando(false);
+    }
   }
 
   useEffect(() => {
