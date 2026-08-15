@@ -30,10 +30,41 @@ export default function ChatPage() {
   const enviandoAccionRef = useRef(false);
   const textoBaseRef = useRef("");
   const escuchandoRef = useRef(false);
+  const isStartingRef = useRef(false);
 
   useEffect(() => {
     escuchandoRef.current = escuchando;
   }, [escuchando]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [mensajes, accion]);
+
+  async function stopClean(rec: any): Promise<void> {
+    return new Promise(resolve => {
+      let resolved = false;
+      const onEnd = () => {
+        if (resolved) return;
+        resolved = true;
+        rec.removeEventListener('end', onEnd);
+        resolve();
+      };
+      rec.addEventListener('end', onEnd);
+      rec.stop();
+      setTimeout(onEnd, 500); // fallback si ya estaba detenido
+    });
+  }
+
+  async function safeStart(rec: any) {
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+    try {
+      await stopClean(rec);
+      rec.start();
+    } finally {
+      isStartingRef.current = false;
+    }
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -51,9 +82,8 @@ export default function ChatPage() {
     function reiniciarPreemptivo() {
       if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
       restartTimerRef.current = setTimeout(() => {
-        if (escuchandoRef.current) {
-          try { rec.stop(); } catch {}
-          try { rec.start(); } catch {}
+        if (escuchandoRef.current && !isStartingRef.current) {
+          safeStart(rec);
         }
       }, 25000); // reinicio antes del corte de 30s del navegador
     }
@@ -70,9 +100,9 @@ export default function ChatPage() {
     };
 
     rec.onend = () => {
-      if (escuchandoRef.current) {
+      if (escuchandoRef.current && !isStartingRef.current) {
         // Auto-detención por silencio: reanuda solo.
-        try { rec.start(); } catch {}
+        safeStart(rec);
       } else {
         // Usuario detuvo a propósito.
         setEscuchando(false);
@@ -82,11 +112,11 @@ export default function ChatPage() {
     rec.onerror = (err: any) => {
       if (err?.error === "no-speech" || err?.error === "aborted") {
         // No-fatal: reintenta si seguimos escuchando.
-        if (escuchandoRef.current) { try { rec.start(); } catch {} }
+        if (escuchandoRef.current && !isStartingRef.current) { safeStart(rec); }
         return;
       }
       console.warn("[SpeechRecognition] error:", err);
-      if (escuchandoRef.current) { try { rec.start(); } catch {} }
+      if (escuchandoRef.current && !isStartingRef.current) { safeStart(rec); }
     };
 
     recognitionRef.current = rec;
@@ -116,14 +146,9 @@ export default function ChatPage() {
     } else {
       // Inicia: guarda base actual, reinicia recognition limpio.
       textoBaseRef.current = input;
-      try {
-        rec.stop(); // asegura que no haya instancia previa
-        rec.start();
-        setEscuchando(true);
-        inputRef.current?.blur(); // oculta teclado/Gboard
-      } catch {
-        setEscuchando(false);
-      }
+      safeStart(rec);
+      setEscuchando(true);
+      inputRef.current?.blur(); // oculta teclado/Gboard
     }
   }
 
