@@ -30,7 +30,6 @@ export default function ChatPage() {
   const enviandoAccionRef = useRef(false);
   const textoBaseRef = useRef("");
   const escuchandoRef = useRef(false);
-  const isStartingRef = useRef(false);
 
   useEffect(() => {
     escuchandoRef.current = escuchando;
@@ -40,115 +39,111 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [mensajes, accion]);
 
-  async function stopClean(rec: any): Promise<void> {
-    return new Promise(resolve => {
-      let resolved = false;
-      const onEnd = () => {
-        if (resolved) return;
-        resolved = true;
-        rec.removeEventListener('end', onEnd);
-        resolve();
-      };
-      rec.addEventListener('end', onEnd);
-      rec.stop();
-      setTimeout(onEnd, 500); // fallback si ya estaba detenido
-    });
-  }
-
-  async function safeStart(rec: any) {
-    if (isStartingRef.current) return;
-    isStartingRef.current = true;
+  function destroyRecognition(rec: any) {
+    if (!rec) return;
     try {
-      await stopClean(rec);
-      rec.start();
-    } finally {
-      isStartingRef.current = false;
-    }
+      rec.onresult = null;
+      rec.onend = null;
+      rec.onerror = null;
+      rec.stop();
+    } catch {}
   }
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [mensajes, accion]);
-
-  useEffect(() => {
+  function createRecognition() {
     const SR =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
+    if (!SR) return null;
     const rec = new SR();
     rec.lang = "es-PE";
     rec.interimResults = true;
     rec.continuous = true;
+    return rec;
+  }
 
-    function reiniciarPreemptivo() {
+  function startRecognition() {
+    const rec = createRecognition();
+    if (!rec) return;
+    destroyRecognition(recognitionRef.current);
+    recognitionRef.current = rec;
+
+    const reiniciarPreemptivo = () => {
       if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
       restartTimerRef.current = setTimeout(() => {
-        if (escuchandoRef.current && !isStartingRef.current) {
-          safeStart(rec);
+        if (escuchandoRef.current) {
+          startRecognition();
         }
-      }, 25000); // reinicio antes del corte de 30s del navegador
-    }
+      }, 25000);
+    };
 
     rec.onresult = (e: any) => {
-      // Reconstruye TODO el transcript desde e.results (evita duplicados).
       let transcript = "";
       for (let i = 0; i < e.results.length; i++) {
         const res = e.results[i];
         if (res && res[0]) transcript += res[0].transcript;
       }
       setInput(textoBaseRef.current + transcript);
-      reiniciarPreemptivo(); // reinicia el timer en cada resultado
     };
 
     rec.onend = () => {
-      if (escuchandoRef.current && !isStartingRef.current) {
-        // Auto-detención por silencio: reanuda solo.
-        safeStart(rec);
+      if (escuchandoRef.current) {
+        startRecognition();
       } else {
-        // Usuario detuvo a propósito.
         setEscuchando(false);
       }
     };
 
     rec.onerror = (err: any) => {
       if (err?.error === "no-speech" || err?.error === "aborted") {
-        // No-fatal: reintenta si seguimos escuchando.
-        if (escuchandoRef.current && !isStartingRef.current) { safeStart(rec); }
+        if (escuchandoRef.current) startRecognition();
         return;
       }
       console.warn("[SpeechRecognition] error:", err);
-      if (escuchandoRef.current && !isStartingRef.current) { safeStart(rec); }
+      if (escuchandoRef.current) startRecognition();
     };
 
-    recognitionRef.current = rec;
+    rec.start();
+  }
+
+  useEffect(() => {
+    escuchandoRef.current = escuchando;
+  }, [escuchando]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [mensajes, accion]);
+
+  useEffect(() => {
     return () => {
       if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      try { rec.stop(); } catch {}
+      destroyRecognition(recognitionRef.current);
     };
   }, []);
 
   function toggleVoz() {
-    const rec = recognitionRef.current;
-    if (!rec) {
-      setMensajes((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content:
-            "🎤 Tu navegador no permite el dictado en esta página. Si estás en el celular, usa el micrófono del teclado (Gboard) para hablar en lugar de escribir.",
-        },
-      ]);
-      return;
+    if (!recognitionRef.current) {
+      const SR =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SR) {
+        setMensajes((m) => [
+          ...m,
+          {
+            role: "assistant",
+            content:
+              "🎤 Tu navegador no permite el dictado en esta página. Si estás en el celular, usa el micrófono del teclado (Gboard) para hablar en lugar de escribir.",
+          },
+        ]);
+        return;
+      }
     }
     if (escuchando) {
-      // Usuario detiene a propósito: marca false ANTES de stop para no reanudar.
       setEscuchando(false);
-      try { rec.stop(); } catch {}
+      destroyRecognition(recognitionRef.current);
+      recognitionRef.current = null;
     } else {
-      // Inicia: guarda base actual, reinicia recognition limpio.
       textoBaseRef.current = input;
-      safeStart(rec);
+      startRecognition();
       setEscuchando(true);
-      inputRef.current?.blur(); // oculta teclado/Gboard
+      inputRef.current?.blur();
     }
   }
 
