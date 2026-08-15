@@ -27,17 +27,6 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const enviandoAccionRef = useRef(false);
-  const enviarRef = useRef<typeof enviar | null>(null);
-  const cargandoRef = useRef(false);
-  const stopManualRef = useRef(false);
-  const textoFinalRef = useRef("");
-
-  useEffect(() => {
-    enviarRef.current = enviar;
-  });
-  useEffect(() => {
-    cargandoRef.current = cargando;
-  }, [cargando]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -53,28 +42,12 @@ export default function ChatPage() {
     rec.continuous = false;
     rec.onresult = (e: any) => {
       let texto = "";
-      let final = "";
       for (let i = 0; i < e.results.length; i++) {
-        if (e.results[i] && e.results[i][0]) {
-          texto += e.results[i][0].transcript;
-          if (e.results[i].isFinal) final += e.results[i][0].transcript;
-        }
+        if (e.results[i] && e.results[i][0]) texto += e.results[i][0].transcript;
       }
-      textoFinalRef.current = final;
       setInput(texto);
     };
-    rec.onend = () => {
-      setEscuchando(false);
-      const t = textoFinalRef.current.trim();
-      textoFinalRef.current = "";
-      const manual = stopManualRef.current;
-      stopManualRef.current = false;
-      // Envío automático al terminar de hablar (a menos que el usuario haya
-      // tocado el micrófono para detenerlo a propósito).
-      if (t && !manual && !cargandoRef.current) {
-        enviarRef.current?.(t);
-      }
-    };
+    rec.onend = () => setEscuchando(false);
     rec.onerror = () => setEscuchando(false);
     recognitionRef.current = rec;
   }, []);
@@ -93,11 +66,9 @@ export default function ChatPage() {
       return;
     }
     if (escuchando) {
-      stopManualRef.current = true;
       rec.stop();
       setEscuchando(false);
     } else {
-      stopManualRef.current = false;
       setInput("");
       try {
         rec.start();
