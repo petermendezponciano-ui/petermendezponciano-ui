@@ -28,8 +28,6 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const enviandoAccionRef = useRef(false);
   const textoBaseRef = useRef("");
-  const finalTranscriptRef = useRef("");
-  const lastResultIndexRef = useRef(0);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -44,32 +42,32 @@ export default function ChatPage() {
     rec.interimResults = true;
     rec.continuous = true;
     rec.onresult = (e: any) => {
-      // Solo procesa resultados NUEVOS desde el último índice
-      let interim = "";
-      for (let i = lastResultIndexRef.current; i < e.results.length; i++) {
+      // Reconstruye TODO el transcript desde e.results (evita duplicados).
+      // Cada segmento ya trae su isFinal actualizado.
+      let transcript = "";
+      for (let i = 0; i < e.results.length; i++) {
         const res = e.results[i];
-        if (res && res[0]) {
-          if (res.isFinal) {
-            finalTranscriptRef.current += res[0].transcript;
-          } else {
-            interim += res[0].transcript;
-          }
-        }
+        if (res && res[0]) transcript += res[0].transcript;
       }
-      lastResultIndexRef.current = e.results.length;
-      setInput(textoBaseRef.current + finalTranscriptRef.current + interim);
+      setInput(textoBaseRef.current + transcript);
     };
     rec.onend = () => {
-      // Al detener: consolida lo final en la base y resetea contadores
-      textoBaseRef.current += finalTranscriptRef.current;
-      finalTranscriptRef.current = "";
-      lastResultIndexRef.current = 0;
-      setEscuchando(false);
+      // Si seguimos en modo escuchando (auto-detención por silencio), reanuda.
+      if (escuchando) {
+        try { rec.start(); } catch {}
+      } else {
+        // Usuario detuvo a propósito: consolida en base y limpia.
+        setEscuchando(false);
+      }
     };
-    rec.onerror = () => {
-      finalTranscriptRef.current = "";
-      lastResultIndexRef.current = 0;
-      setEscuchando(false);
+    rec.onerror = (err: any) => {
+      // Errores no fatales (no-speech, aborted) no rompen; solo log.
+      if (err?.error !== "no-speech" && err?.error !== "aborted") {
+        console.warn("[SpeechRecognition] error:", err);
+      }
+      if (escuchando) {
+        try { rec.start(); } catch {}
+      }
     };
     recognitionRef.current = rec;
   }, []);
@@ -88,13 +86,12 @@ export default function ChatPage() {
       return;
     }
     if (escuchando) {
-      rec.stop();
+      // Usuario detiene a propósito: marca false ANTES de stop para no reanudar.
       setEscuchando(false);
+      try { rec.stop(); } catch {}
     } else {
-      // Guarda el texto actual como base; resetea transcript final e índice
+      // Inicia: guarda base actual y arranca.
       textoBaseRef.current = input;
-      finalTranscriptRef.current = "";
-      lastResultIndexRef.current = 0;
       try {
         rec.start();
         setEscuchando(true);

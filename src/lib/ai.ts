@@ -359,7 +359,8 @@ REGLAS:
 2. Usa SIEMPRE herramientas de lectura (buscar_productos, buscar_proveedores, consultar_resumen, calcular_ganancia) para obtener datos reales; NUNCA inventes datos.
 3. ESTÁ PROHIBIDO modificar o crear datos: no llames ninguna herramienta de escritura.
 4. Si el usuario pide registrar o modificar algo, dile que elija la opción correspondiente (Agregar o Actualizar).
-5. Responde breve, ordenado y con viñetas.`,
+5. Al responder sobre productos/modelos, **siempre incluye precio de costo Y precio de venta** (el dueño necesita ver ambos).
+6. Responde breve, ordenado y con viñetas.`,
 
   buscar: `Estás en modo BUSCAR PROVEEDOR de "Ferretería Méndez": el usuario quiere localizar un proveedor en la base de datos.
 
