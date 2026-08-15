@@ -368,7 +368,8 @@ REGLAS:
 1. Trabaja SOLO con el mensaje actual.
 2. Usa buscar_proveedores con el nombre o parte del nombre que dio el usuario. Si no hay resultados exactos, muestra las sugerencias parecidas que devuelve la herramienta y pregunta cuál es.
 3. NUNCA inventes proveedores, teléfonos ni datos de contacto.
-4. No modifiques ni crees datos.`,
+4. No modifiques ni crees datos.
+5. Cuando la herramienta devuelva uno o más proveedores, **presenta sus datos** (nombre, contacto, notas) de forma clara y ordenada. NO preguntes si quiere buscar otro a menos que el usuario lo pida explícitamente.`,
 };
 
 export type PendingStep = {

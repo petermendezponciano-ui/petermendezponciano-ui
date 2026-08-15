@@ -22,12 +22,18 @@ export default function ChatPage() {
   const [placeholderActivo, setPlaceholderActivo] = useState("");
   const [intencionSeleccionada, setIntencionSeleccionada] = useState("");
   const recognitionRef = useRef<any>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const archivoRef = useRef<HTMLInputElement>(null);
   const camaraRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const enviandoAccionRef = useRef(false);
   const textoBaseRef = useRef("");
+  const escuchandoRef = useRef(false);
+
+  useEffect(() => {
+    escuchandoRef.current = escuchando;
+  }, [escuchando]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -41,35 +47,53 @@ export default function ChatPage() {
     rec.lang = "es-PE";
     rec.interimResults = true;
     rec.continuous = true;
+
+    function reiniciarPreemptivo() {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = setTimeout(() => {
+        if (escuchandoRef.current) {
+          try { rec.stop(); } catch {}
+          try { rec.start(); } catch {}
+        }
+      }, 25000); // reinicio antes del corte de 30s del navegador
+    }
+
     rec.onresult = (e: any) => {
       // Reconstruye TODO el transcript desde e.results (evita duplicados).
-      // Cada segmento ya trae su isFinal actualizado.
       let transcript = "";
       for (let i = 0; i < e.results.length; i++) {
         const res = e.results[i];
         if (res && res[0]) transcript += res[0].transcript;
       }
       setInput(textoBaseRef.current + transcript);
+      reiniciarPreemptivo(); // reinicia el timer en cada resultado
     };
+
     rec.onend = () => {
-      // Si seguimos en modo escuchando (auto-detención por silencio), reanuda.
-      if (escuchando) {
+      if (escuchandoRef.current) {
+        // Auto-detención por silencio: reanuda solo.
         try { rec.start(); } catch {}
       } else {
-        // Usuario detuvo a propósito: consolida en base y limpia.
+        // Usuario detuvo a propósito.
         setEscuchando(false);
       }
     };
+
     rec.onerror = (err: any) => {
-      // Errores no fatales (no-speech, aborted) no rompen; solo log.
-      if (err?.error !== "no-speech" && err?.error !== "aborted") {
-        console.warn("[SpeechRecognition] error:", err);
+      if (err?.error === "no-speech" || err?.error === "aborted") {
+        // No-fatal: reintenta si seguimos escuchando.
+        if (escuchandoRef.current) { try { rec.start(); } catch {} }
+        return;
       }
-      if (escuchando) {
-        try { rec.start(); } catch {}
-      }
+      console.warn("[SpeechRecognition] error:", err);
+      if (escuchandoRef.current) { try { rec.start(); } catch {} }
     };
+
     recognitionRef.current = rec;
+    return () => {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      try { rec.stop(); } catch {}
+    };
   }, []);
 
   function toggleVoz() {
@@ -90,11 +114,13 @@ export default function ChatPage() {
       setEscuchando(false);
       try { rec.stop(); } catch {}
     } else {
-      // Inicia: guarda base actual y arranca.
+      // Inicia: guarda base actual, reinicia recognition limpio.
       textoBaseRef.current = input;
       try {
+        rec.stop(); // asegura que no haya instancia previa
         rec.start();
         setEscuchando(true);
+        inputRef.current?.blur(); // oculta teclado/Gboard
       } catch {
         setEscuchando(false);
       }
