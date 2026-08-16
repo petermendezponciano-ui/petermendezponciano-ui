@@ -1,9 +1,8 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import ProductoFoto from "./ProductoFoto";
-import EliminarProducto from "./EliminarProducto";
+import ProductoFila from "./ProductoFila";
 
 type Modelo = {
+  id: string;
   nombre: string;
   precio_costo: number | null;
   precio_venta: number | null;
@@ -21,17 +20,12 @@ type ProductoFila = {
   modelos: Modelo[] | null;
 };
 
-function soles(n: number | null | undefined): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return `S/ ${n.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 export default async function ProductosPage() {
   const supabase = await createClient();
 
   const { data } = await supabase
     .from("productos")
-    .select("*, proveedores(nombre), modelos(nombre, precio_costo, precio_venta, cantidad)")
+    .select("*, proveedores(nombre), modelos(id, nombre, precio_costo, precio_venta, cantidad)")
     .order("nombre");
 
   const productos = data as ProductoFila[] | null;
@@ -39,7 +33,9 @@ export default async function ProductosPage() {
   type Fila = {
     key: string;
     productoId: string;
+    modeloId: string | null;
     nombre: string;
+    marca: string | null;
     fotoUrl: string | null;
     esPrimera: boolean;
     marcaModelo: string;
@@ -80,7 +76,9 @@ export default async function ProductosPage() {
       return {
         key,
         productoId: p.id,
+        modeloId: m?.id ?? null,
         nombre: p.nombre,
+        marca: p.marca,
         fotoUrl: p.foto_url,
         esPrimera,
         marcaModelo,
@@ -133,52 +131,7 @@ export default async function ProductosPage() {
           <tbody>
             {filas.length > 0 ? (
               filas.map((f) => (
-                <tr key={f.key}>
-                  <td>
-                    {f.esPrimera ? (
-                      <ProductoFoto
-                        productoId={f.productoId}
-                        fotoUrl={f.fotoUrl}
-                        nombre={f.nombre}
-                      />
-                    ) : (
-                      ""
-                    )}
-                  </td>
-                  <td>{f.nombre}</td>
-                  <td>{f.marcaModelo}</td>
-                  <td>{f.tamano ?? "—"}</td>
-                  <td className="num">
-                    {f.cantidad != null
-                      ? `${f.cantidad}${f.unidad ? ` ${f.unidad}` : ""}`
-                      : "—"}
-                  </td>
-                  <td className="num">{soles(f.costoUnitario)}</td>
-                  <td className="num">{soles(f.costoTotal)}</td>
-                  <td className="num">{soles(f.ventaUnitario)}</td>
-                  <td className="num">{soles(f.ventaTotal)}</td>
-                  <td className="num gan-uni">
-                    {f.gananciaUnitaria != null ? soles(f.gananciaUnitaria) : "—"}
-                  </td>
-                  <td className="num gan-total">
-                    {f.gananciaTotal != null ? soles(f.gananciaTotal) : "—"}
-                  </td>
-                  <td>
-                    {f.proveedor ? (
-                      <Link
-                        className="link-proveedor"
-                        href={`/proveedores?nombre=${encodeURIComponent(f.proveedor)}`}
-                      >
-                        {f.proveedor}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td>
-                    {f.esPrimera ? <EliminarProducto productoId={f.productoId} /> : ""}
-                  </td>
-                </tr>
+                <ProductoFila key={f.key} fila={f} esPrimera={f.esPrimera} />
               ))
             ) : (
               <tr>
