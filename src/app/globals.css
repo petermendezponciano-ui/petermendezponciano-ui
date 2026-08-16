@@ -1206,6 +1206,8 @@ a {
   font-weight: 700;
   font-size: 13px;
   padding: 8px 10px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .catalogo-card-body {
@@ -1242,6 +1244,7 @@ a {
 
 .catalogo-specs table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 
@@ -1255,11 +1258,15 @@ a {
 
 .catalogo-specs td.label {
   font-weight: 700;
+  width: 42%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .catalogo-specs td.value {
   text-align: right;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .catalogo-specs .value--precio {
