@@ -45,7 +45,6 @@ export default function EditarProducto({ datos, onClose }: Props) {
 
   const esValido = () => {
     if (!nombre.trim()) return "El nombre es obligatorio";
-    if (precios.cantidad === null || precios.cantidad <= 0) return "La cantidad debe ser mayor a 0";
     const tieneCosto = precios.costo_unitario != null || precios.costo_total != null;
     const tienePrecio = precios.precio_unitario != null || precios.precio_total != null;
     if (!tieneCosto) return "Debe ingresar al menos costo unitario o costo total";
@@ -151,7 +150,7 @@ export default function EditarProducto({ datos, onClose }: Props) {
 
               <div className="editar-grid">
                 <label className="editar-field">
-                  <span>Cantidad *</span>
+                  <span>Cantidad</span>
                   <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
                     <input
                       type="number"
