@@ -156,6 +156,7 @@ export default function ChatPage() {
   }, []);
 
   function toggleVoz() {
+    console.log("[toggleVoz] called, escuchando:", escuchando, "cargando:", cargando);
     if (!recognitionRef.current) {
       const SR =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -560,11 +561,11 @@ export default function ChatPage() {
           type="button"
           className={`chat-mic ${escuchando ? "chat-mic-on" : ""}`}
           onClick={toggleVoz}
-          disabled={cargando}
+          onTouchStart={(e) => { e.preventDefault(); toggleVoz(); }}
           aria-label="Dictado por voz"
           title="Hablar en lugar de escribir"
         >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
             <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z" />
             <path d="M17 11a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z" />
           </svg>
