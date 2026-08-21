@@ -666,6 +666,8 @@ export async function runAgent(
   let input: string | ToolResultInput[] = textoUsuario;
   let lastId = prevId;
   let clarificado = false;
+  let correccionEntidad = false;
+  let sintesisHecha = false;
 
   for (let i = 0; i < 6; i++) {
     const interaction = await crearInteraccion(input, lastId, true, toolsAccion, systemPrompt);
@@ -684,6 +686,22 @@ export async function runAgent(
       calls = calls.filter((c) => c.name !== "calcular_ganancia");
       if (calls.length !== antes) {
         console.error("[w] propuesta agregar: se eliminó calcular_ganancia de la propuesta");
+      }
+    }
+
+    // Respaldo débil: si propuso solo agregar_producto sin modelo, el servidor
+    // completa agregar_modelo con los datos que el usuario ya dio (una sola vez).
+    if (
+      !sintesisHecha &&
+      detectarIntencion(textoUsuario).tipo === "agregar" &&
+      calls.some((c) => c.name === "agregar_producto") &&
+      !calls.some((c) => c.name === "agregar_modelo")
+    ) {
+      const sintetico = sintetizarAgregarModelo(calls, [crudo]);
+      if (sintetico) {
+        sintesisHecha = true;
+        console.error("[w] agregar_modelo sintetizado con datos del usuario");
+        calls = [...calls, sintetico];
       }
     }
 
@@ -763,7 +781,36 @@ export async function runAgent(
 
       const res = await resolverPasosEscritura(supabase, calls, crudo);
       if (res.pregunta) {
-        return { reply: res.pregunta, pendingAction: null, lastId: null };
+        // Las preguntas de desambiguación van al usuario; las correcciones
+        // internas (interno) se devuelven al modelo para que se autocorrija.
+        if (!res.interno) {
+          return { reply: res.pregunta, pendingAction: null, lastId: null };
+        }
+        if (!correccionEntidad) {
+          correccionEntidad = true;
+          console.error("[w] entidad no coincide: corrección interna devuelta al modelo");
+          const textoCorreccion = res.pregunta;
+          input = calls.map((call) => ({
+            type: "function_result" as const,
+            call_id: call.id,
+            name: call.name,
+            result: [
+              {
+                type: "text" as const,
+                text: WRITE_NAMES.has(call.name)
+                  ? textoCorreccion
+                  : "No se ejecutó esta llamada.",
+              },
+            ],
+          }));
+          continue;
+        }
+        return {
+          reply:
+            "No pude confirmar el producto del que hablas. ¿Me indicas otra vez su nombre?",
+          pendingAction: null,
+          lastId: null,
+        };
       }
 
       return {
@@ -1230,6 +1277,8 @@ export async function runAgentBackup(
   ].join(" ");
 
   let clarificado = false;
+  let correccionEntidad = false;
+  let sintesisHecha = false;
 
   for (let i = 0; i < 6; i++) {
     const msg = await llamarRespaldo(messages, true, toolsAccion);
@@ -1245,6 +1294,23 @@ export async function runAgentBackup(
       calls = calls.filter((c) => c.name !== "calcular_ganancia");
       if (calls.length !== antes) {
         console.error("[w] backup: propuesta agregar: se eliminó calcular_ganancia");
+      }
+    }
+
+    // Respaldo débil: si propuso solo agregar_producto sin modelo, el servidor
+    // completa agregar_modelo con los datos que el usuario ya dio (una sola vez).
+    // referencia incluye los mensajes previos (ahí puede estar la cantidad).
+    if (
+      !sintesisHecha &&
+      detectarIntencion(textoUsuario).tipo === "agregar" &&
+      calls.some((c) => c.name === "agregar_producto") &&
+      !calls.some((c) => c.name === "agregar_modelo")
+    ) {
+      const sintetico = sintetizarAgregarModelo(calls, [crudo, referencia]);
+      if (sintetico) {
+        sintesisHecha = true;
+        console.error("[w] backup: agregar_modelo sintetizado con datos del usuario");
+        calls = [...calls, sintetico];
       }
     }
 
@@ -1426,7 +1492,32 @@ export async function runAgentBackup(
 
       const res = await resolverPasosEscritura(supabase, calls, referencia);
       if (res.pregunta) {
-        return { reply: res.pregunta, pendingAction: null, lastId: null };
+        // Las preguntas de desambiguación van al usuario; las correcciones
+        // internas (interno) se devuelven al modelo para que se autocorrija.
+        if (!res.interno) {
+          return { reply: res.pregunta, pendingAction: null, lastId: null };
+        }
+        if (!correccionEntidad) {
+          correccionEntidad = true;
+          console.error("[w] backup: entidad no coincide: corrección interna devuelta al modelo");
+          for (const c of calls) {
+            messages.push({
+              role: "tool",
+              tool_call_id: c.id,
+              name: c.name,
+              content: WRITE_NAMES.has(c.name)
+                ? res.pregunta
+                : "No se ejecutó esta llamada.",
+            });
+          }
+          continue;
+        }
+        return {
+          reply:
+            "No pude confirmar el producto del que hablas. ¿Me indicas otra vez su nombre?",
+          pendingAction: null,
+          lastId: null,
+        };
       }
 
       return {
@@ -1747,6 +1838,7 @@ async function resolverPasosEscritura(
   referencia?: string | null
 ): Promise<{
   pregunta: string | null;
+  interno?: boolean;
   pasos: {
     call: { id: string; name: string; arguments: Record<string, unknown> };
     reusarProveedor: string | null;
@@ -1757,22 +1849,23 @@ async function resolverPasosEscritura(
     reusarProveedor: string | null;
   }[] = [];
 
-  // Resolución de entidad obligatoria: el producto o proveedor propuesto debe
-  // coincidir con el mensaje ACTUAL (o los 2 turnos recientes) del usuario; si el
-  // modelo usa un nombre de un flujo anterior, se detiene y se le pide buscar el
-  // correcto.
+  // Resolución de entidad obligatoria SOLO para cambios (actualizar_*): el
+  // producto o proveedor propuesto debe coincidir con el mensaje actual (o los
+  // turnos recientes). Si no coincide, se devuelve una corrección INTERNA al
+  // modelo (nunca visible al usuario) para que busque el correcto.
+  // Para agregar_* no se exige: el nombre puede venir de una aclaración previa
+  // (ej: el usuario responde solo con precios) y la tarjeta de confirmación ya
+  // protege contra errores antes de guardar.
   if (referencia && normalizar(referencia)) {
     for (const c of calls) {
       const esDeProducto =
-        c.name === "actualizar_producto" ||
-        c.name === "actualizar_modelo" ||
-        c.name === "agregar_modelo";
-      const esDeProveedor =
-        c.name === "actualizar_producto" || c.name === "agregar_producto";
+        c.name === "actualizar_producto" || c.name === "actualizar_modelo";
+      const esDeProveedor = c.name === "actualizar_producto";
       if (esDeProducto && c.arguments.producto) {
         if (!nombreMencionadoEnTexto(String(c.arguments.producto), referencia)) {
           return {
-            pregunta: `El producto "${c.arguments.producto}" que propusiste NO coincide con lo que el usuario pidió. El usuario escribió: «${referencia.trim().slice(0, 160)}». Busca con buscar_productos el producto correcto ANTES de proponer el cambio y NO uses datos ni nombres de flujos anteriores.`,
+            pregunta: `El producto "${c.arguments.producto}" que propusiste NO coincide con lo que el usuario pidió. El usuario escribió: «${referencia.trim().slice(0, 160)}». Busca con buscar_productos el producto correcto ANTES de proponer el cambio y NO usa datos ni nombres de flujos anteriores.`,
+            interno: true,
             pasos: [],
           };
         }
@@ -1781,6 +1874,7 @@ async function resolverPasosEscritura(
         if (!nombreMencionadoEnTexto(String(c.arguments.proveedor), referencia)) {
           return {
             pregunta: `El proveedor "${c.arguments.proveedor}" que propusiste NO coincide con lo que el usuario pidió. El usuario escribió: «${referencia.trim().slice(0, 160)}». Usa el nombre del proveedor que el usuario mencionó en este mensaje.`,
+            interno: true,
             pasos: [],
           };
         }
@@ -2182,6 +2276,75 @@ function verificarSlotsActualizar(
       ],
     })),
   };
+}
+
+// Síntesis determinista del modelo faltante: los modelos de respaldo a veces
+// proponen solo agregar_producto y repiten lo mismo aunque se les corrija.
+// Con los datos que el usuario ya dio en su texto (cantidad, costo y venta)
+// el servidor completa la llamada agregar_modelo por ellos.
+function extraerCantidadTexto(texto: string): number | null {
+  const m =
+    /(\d+(?:[.,]\d+)?)\s*(?:unidad|unidades|und|uds|pieza|piezas|docena|docenas|par|pares|kilo|kilos|kg|metro|metros|litro|litros|galon|galones)/i.exec(
+      texto
+    );
+  if (!m) return null;
+  const n = parseFloat(m[1].replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+function numeroEnSegmento(seg: string): number | null {
+  const m = /(\d{1,6}(?:[.,]\d{1,2})?)/.exec(seg);
+  if (!m) return null;
+  const n = parseFloat(m[1].replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+function sintetizarAgregarModelo(
+  calls: { id: string; name: string; arguments: Record<string, unknown> }[],
+  textos: (string | null | undefined)[]
+): { id: string; name: string; arguments: Record<string, unknown> } | null {
+  const prod = calls.find((c) => c.name === "agregar_producto");
+  if (!prod) return null;
+  const nombreProd = String(prod.arguments.nombre ?? "").trim();
+  if (!nombreProd) return null;
+
+  const texto = textos
+    .filter((t): t is string => !!t && !!t.trim())
+    .join(" , ");
+  const cantidad = extraerCantidadTexto(texto);
+
+  let costo: number | null = null;
+  let costoEsTotal = false;
+  let venta: number | null = null;
+  let ventaEsTotal = false;
+  for (const seg of texto.split(/[,.;]|\by\b/i)) {
+    const s = seg.trim();
+    if (!s) continue;
+    const n = numeroEnSegmento(s);
+    if (n == null) continue;
+    if (/venta|vender|vendo/i.test(s)) {
+      if (venta == null) {
+        venta = n;
+        ventaEsTotal = /total/i.test(s);
+      }
+    } else if (/costo|cost|compra/i.test(s)) {
+      if (costo == null) {
+        costo = n;
+        costoEsTotal = /total/i.test(s);
+      }
+    }
+  }
+
+  if (cantidad == null || (costo == null && venta == null)) return null;
+
+  const args: Record<string, unknown> = { producto: nombreProd, cantidad };
+  if (costo != null) {
+    args[costoEsTotal ? "precio_costo_total" : "precio_costo_unitario"] = costo;
+  }
+  if (venta != null) {
+    args[ventaEsTotal ? "precio_venta_total" : "precio_venta"] = venta;
+  }
+  return { id: `sint-${Date.now()}`, name: "agregar_modelo", arguments: args };
 }
 
 // Slots obligatorios de AGREGAR: si el usuario indicó cantidad o precio, la
